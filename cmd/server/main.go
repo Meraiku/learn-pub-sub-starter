@@ -50,7 +50,7 @@ func main() {
 				log.Print(err)
 			}
 		case "resume":
-			log.Panicln("Sending resume message")
+			log.Println("Sending resume message")
 			if err := pubsub.PublishJSON(rCh, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{IsPaused: false}); err != nil {
 				log.Print(err)
 			}

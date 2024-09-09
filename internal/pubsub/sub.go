@@ -1,39 +1,46 @@
 package pubsub
 
 import (
+	"encoding/json"
+	"log"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func DeclareAndBind(
+func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
 	queueName,
 	key string,
-	simpleQueueType int, // an enum to represent "durable" or "transient"
-) (*amqp.Channel, amqp.Queue, error) {
-	var durable, autoDelete, exclusive, noWait bool
-
-	switch simpleQueueType {
-	case 0:
-		durable = true
-	case 1:
-		autoDelete = true
-		exclusive = true
-	}
-
-	rCh, err := conn.Channel()
+	simpleQueueType int,
+	handler func(T),
+) error {
+	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
 	if err != nil {
-		return nil, amqp.Queue{}, err
+		return err
 	}
 
-	queue, err := rCh.QueueDeclare(queueName, durable, autoDelete, exclusive, noWait, nil)
+	deliveryCh, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
-		return nil, amqp.Queue{}, err
+		return err
 	}
 
-	if err := rCh.QueueBind(queueName, key, exchange, noWait, nil); err != nil {
-		return nil, amqp.Queue{}, err
-	}
+	go func() {
+		for msg := range deliveryCh {
+			var v T
 
-	return rCh, queue, nil
+			if err := json.Unmarshal(msg.Body, &v); err != nil {
+				log.Print(err)
+				continue
+			}
+			handler(v)
+
+			if err := msg.Ack(false); err != nil {
+				log.Print(err)
+				continue
+			}
+		}
+	}()
+
+	return nil
 }
