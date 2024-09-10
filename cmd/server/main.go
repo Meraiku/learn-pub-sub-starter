@@ -30,8 +30,7 @@ func main() {
 
 	key := fmt.Sprintf("%s.*", routing.GameLogSlug)
 
-	_, _, err = pubsub.DeclareAndBind(conn, routing.ExchangePerilTopic, routing.GameLogSlug, key, 0)
-	if err != nil {
+	if err := pubsub.SubscribeGob(conn, routing.ExchangePerilTopic, routing.GameLogSlug, key, pubsub.Durable, hadleGameLogs()); err != nil {
 		log.Fatal(err)
 	}
 
@@ -63,4 +62,14 @@ func main() {
 	}
 
 	fmt.Println("Server is shutting down...")
+}
+
+func hadleGameLogs() func(l routing.GameLog) pubsub.AckType {
+	return func(l routing.GameLog) pubsub.AckType {
+		defer fmt.Print("> ")
+
+		gamelogic.WriteLog(l)
+
+		return pubsub.Ack
+	}
 }

@@ -1,10 +1,28 @@
 package pubsub
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
-	"log"
+	"errors"
+	"io"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+type AckType string
+
+const (
+	Ack         AckType = "ack"
+	NackRequeue AckType = "nack_requeue"
+	NackDiscard AckType = "nack_discard"
+)
+
+type SimpleQueueType = int
+
+const (
+	Durable SimpleQueueType = iota
+	Transient
 )
 
 func SubscribeJSON[T any](
@@ -12,35 +30,41 @@ func SubscribeJSON[T any](
 	exchange,
 	queueName,
 	key string,
-	simpleQueueType int,
-	handler func(T),
+	simpleQueueType SimpleQueueType,
+	handler func(T) AckType,
 ) error {
-	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
-	if err != nil {
-		return err
+
+	f := func(b []byte) (T, error) {
+		var v T
+
+		err := json.Unmarshal(b, &v)
+
+		return v, err
 	}
 
-	deliveryCh, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
-	if err != nil {
-		return err
-	}
+	return subscribe(conn, exchange, queueName, key, simpleQueueType, handler, f)
+}
 
-	go func() {
-		for msg := range deliveryCh {
-			var v T
+func SubscribeGob[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType SimpleQueueType,
+	handler func(T) AckType,
+) error {
+	f := func(b []byte) (T, error) {
+		var v T
 
-			if err := json.Unmarshal(msg.Body, &v); err != nil {
-				log.Print(err)
-				continue
-			}
-			handler(v)
-
-			if err := msg.Ack(false); err != nil {
-				log.Print(err)
-				continue
+		err := gob.NewDecoder(bytes.NewReader(b)).Decode(&v)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				return v, err
 			}
 		}
-	}()
 
-	return nil
+		return v, nil
+	}
+
+	return subscribe(conn, exchange, queueName, key, simpleQueueType, handler, f)
 }
